@@ -16,6 +16,13 @@ const NODE_WIDGET = {
 };
 const EXTS = "exr,png,jpg,jpeg,tif,tiff,webp,bmp,hdr,dpx,tga";
 const BTN = "📁 Browse…";
+// Nodos de SECUENCIA (patrón %0Nd). Al elegir un frame, el nº se convierte a
+// padding printf con el MISMO ancho que los dígitos del frame — como Nuke resuelve
+// `####` (p.ej. shot.0042.exr -> shot.%04d.exr; render.123.exr -> render.%03d.exr).
+const SEQ_NODES = new Set(["LoadEXRFrames", "SaveEXRFrames"]);
+function toSeqPattern(path) {
+  return path.replace(/(\d+)(\.[^.\/]+)$/, (_m, num, ext) => "%0" + num.length + "d" + ext);
+}
 
 function dirname(p) {
   if (!p) return "/";
@@ -56,7 +63,7 @@ function openBrowser(startPath, onPick) {
   pathInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nav(pathInput.value); });
   const head = el("div", { display: "flex", gap: "6px", alignItems: "center", padding: "10px", borderBottom: "1px solid #333" });
   head.append(btn("⬆", () => nav(dirname(cur))), pathInput, btn("Ir", () => nav(pathInput.value)),
-    btn("📂 Usar carpeta", () => { onPick(cur); ov.remove(); }), btn("✕", () => ov.remove()));
+    btn("📂 Usar carpeta", () => { onPick(cur, false); ov.remove(); }), btn("✕", () => ov.remove()));
   const list = el("div", { overflowY: "auto", padding: "6px 10px" });
   box.append(head, list); ov.append(box);
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
@@ -79,7 +86,7 @@ function openBrowser(startPath, onPick) {
     if (j.error) { list.textContent = "❌ " + j.error; return; }
     list.textContent = "";
     (j.dirs || []).forEach((d) => list.append(row("📁", d, () => nav(joinPath(cur, d)))));
-    (j.files || []).forEach((f) => list.append(row("🖼", f, () => { onPick(joinPath(cur, f)); ov.remove(); })));
+    (j.files || []).forEach((f) => list.append(row("🖼", f, () => { onPick(joinPath(cur, f), true); ov.remove(); })));
     if (!(j.dirs || []).length && !(j.files || []).length) list.append(row("·", "(sin carpetas ni imágenes)", () => {}));
   }
   nav(startPath || "/");
@@ -87,8 +94,10 @@ function openBrowser(startPath, onPick) {
 
 function attach(node, widgetName) {
   const w = node.widgets?.find((x) => x.name === widgetName);
+  const isSeq = SEQ_NODES.has(node.comfyClass || node.type);
   const start = w && w.value && String(w.value).includes("/") ? dirname(w.value) : "/";
-  openBrowser(start, (picked) => {
+  openBrowser(start, (picked, isFile) => {
+    if (isFile && isSeq) picked = toSeqPattern(picked);  // frame -> patrón %0Nd (Nuke)
     if (w) { w.value = picked; try { w.callback?.(picked); } catch (e) {} }
     node.setDirtyCanvas(true, true);
   });
