@@ -23,6 +23,23 @@ const SEQ_NODES = new Set(["LoadEXRFrames", "SaveEXRFrames"]);
 function toSeqPattern(path) {
   return path.replace(/(\d+)(\.[^.\/]+)$/, (_m, num, ext) => "%0" + num.length + "d" + ext);
 }
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+// Auto-detección de SECUENCIA: dado el fichero elegido y la lista de la carpeta,
+// localiza los hermanos con el mismo prefijo/sufijo y nº variable → devuelve el
+// patrón printf (padding = ancho de dígitos del frame, estilo Nuke) y el rango.
+function detectSeq(filename, files) {
+  const m = filename.match(/^(.*?)(\d+)(\.[^.]+)$/);
+  if (!m) return null;
+  const [, prefix, digits, ext] = m;
+  const re = new RegExp("^" + escRe(prefix) + "(\\d+)" + escRe(ext) + "$");
+  const nums = [];
+  for (const f of files || []) { const mm = f.match(re); if (mm) nums.push(parseInt(mm[1], 10)); }
+  if (nums.length < 2) return null;  // un solo frame → no es secuencia
+  nums.sort((a, b) => a - b);
+  return { pattern: prefix + "%0" + digits.length + "d" + ext,
+           start: nums[0], end: nums[nums.length - 1], count: nums.length };
+}
 
 function dirname(p) {
   if (!p) return "/";
@@ -63,13 +80,13 @@ function openBrowser(startPath, onPick) {
   pathInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nav(pathInput.value); });
   const head = el("div", { display: "flex", gap: "6px", alignItems: "center", padding: "10px", borderBottom: "1px solid #333" });
   head.append(btn("⬆", () => nav(dirname(cur))), pathInput, btn("Ir", () => nav(pathInput.value)),
-    btn("📂 Usar carpeta", () => { onPick(cur, false); ov.remove(); }), btn("✕", () => ov.remove()));
+    btn("📂 Usar carpeta", () => { onPick(cur, { isFile: false, dir: cur }); ov.remove(); }), btn("✕", () => ov.remove()));
   const list = el("div", { overflowY: "auto", padding: "6px 10px" });
   box.append(head, list); ov.append(box);
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
   document.body.append(ov);
 
-  let cur = "/";
+  let cur = "/", curFiles = [];
   function row(icon, name, onclick) {
     const d = el("div", { display: "flex", gap: "8px", padding: "5px 6px", borderRadius: "6px", cursor: "pointer", alignItems: "center" });
     d.onmouseenter = () => (d.style.background = "#2a2a30");
@@ -84,21 +101,37 @@ function openBrowser(startPath, onPick) {
     let j;
     try { j = await browse(cur); } catch (e) { list.textContent = "❌ " + e.message; return; }
     if (j.error) { list.textContent = "❌ " + j.error; return; }
+    curFiles = j.files || [];
     list.textContent = "";
     (j.dirs || []).forEach((d) => list.append(row("📁", d, () => nav(joinPath(cur, d)))));
-    (j.files || []).forEach((f) => list.append(row("🖼", f, () => { onPick(joinPath(cur, f), true); ov.remove(); })));
+    curFiles.forEach((f) => list.append(row("🖼", f, () => { onPick(joinPath(cur, f), { isFile: true, dir: cur, file: f, files: curFiles }); ov.remove(); })));
     if (!(j.dirs || []).length && !(j.files || []).length) list.append(row("·", "(sin carpetas ni imágenes)", () => {}));
   }
   nav(startPath || "/");
 }
 
+function setW(node, name, value) {
+  const w = node.widgets?.find((x) => x.name === name);
+  if (w) { w.value = value; try { w.callback?.(value); } catch (e) {} }
+}
 function attach(node, widgetName) {
   const w = node.widgets?.find((x) => x.name === widgetName);
-  const isSeq = SEQ_NODES.has(node.comfyClass || node.type);
+  const isSeqNode = SEQ_NODES.has(node.comfyClass || node.type);
   const start = w && w.value && String(w.value).includes("/") ? dirname(w.value) : "/";
-  openBrowser(start, (picked, isFile) => {
-    if (isFile && isSeq) picked = toSeqPattern(picked);  // frame -> patrón %0Nd (Nuke)
-    if (w) { w.value = picked; try { w.callback?.(picked); } catch (e) {} }
+  openBrowser(start, (picked, info) => {
+    let value = picked;
+    if (info.isFile && isSeqNode) {
+      // Auto-detecta la secuencia en la carpeta (hermanos con mismo prefijo/sufijo).
+      const seq = detectSeq(info.file, info.files);
+      if (seq) {
+        value = joinPath(info.dir, seq.pattern);          // patrón %0Nd (Nuke)
+        setW(node, "start_frame", seq.start);             // rango auto
+        setW(node, "end_frame", seq.end);
+      } else {
+        value = toSeqPattern(picked);                     // un solo frame → aún patrón
+      }
+    }
+    if (w) { w.value = value; try { w.callback?.(value); } catch (e) {} }
     node.setDirtyCanvas(true, true);
   });
 }
