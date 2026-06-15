@@ -29,3 +29,9 @@ b = (0.208 * r + 0.173 * g + 0.264 * b - 0.473 * a) * 0.18215
 ## Known Issues
 
 - No load TIFF node, and the TIFF save is bad/outdated
+
+
+---
+
+## Fork oveCom: navegador de servidor
+Los nodos por ruta (LoadEXR, LoadEXRFrames, SaveEXRFrames, LoadLatentEXR, LoadImageAndPrompt, SaveImageAndPrompt*, SaveEXR/SaveTiff/SaveLatentEXR) tienen un botón **`📁 Browse…`** (y opción de menú contextual *Browse server…*) que abre un modal para navegar las carpetas del **servidor** (incl. rutas absolutas como `/mnt/s3files/<proyecto>`) y elegir un fichero EXR/imagen o una carpeta → rellena `filepath`/`filename_prefix`. Ruta de listado `/hqis/browse` en `__init__.py`, UI en `web/js/hqis_browser.js`.
